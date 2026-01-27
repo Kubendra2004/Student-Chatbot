@@ -178,18 +178,6 @@ GREETINGS: [
 
 ---
 
-## 📸 Screenshots
-
-<div align="center">
-
-| Dark Mode | Light Mode |
-|-----------|------------|
-| Coming Soon | Coming Soon |
-
-</div>
-
----
-
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
@@ -198,7 +186,7 @@ This project is open source and available under the [MIT License](LICENSE).
 
 <div align="center">
 
-**Made with ❤️ by [Kubendra](https://github.com/Kubendra2004)**
+**Made by [Kubendra](https://github.com/Kubendra2004)**
 
 ⭐ Star this repo if you found it helpful!
 
