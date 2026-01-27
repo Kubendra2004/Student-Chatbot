@@ -1,0 +1,33 @@
+# Python files (original bot)
+bot.py
+*.pyc
+__pycache__/
+
+# Text data files (used by Python bot only)
+greetings.txt
+facts.txt
+
+# Excel files
+*.xlsx
+*.xls
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies (if any added later)
+node_modules/
+
+# Environment files
+.env
+.env.local

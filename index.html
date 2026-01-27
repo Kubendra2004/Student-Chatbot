@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Interactive Student Information Chatbot - Manage student records with a modern chat interface">
+    <meta name="keywords" content="student, chatbot, education, records, management">
+    <title>Student Bot - Interactive Assistant</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="css/styles.css">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+</head>
+<body>
+    <!-- Background Animation -->
+    <div class="background-animation">
+        <div class="floating-shapes">
+            <div class="shape"></div>
+            <div class="shape"></div>
+            <div class="shape"></div>
+            <div class="shape"></div>
+            <div class="shape"></div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-left">
+                <div class="bot-avatar">
+                    <span class="avatar-icon">🤖</span>
+                    <span class="status-dot"></span>
+                </div>
+                <div class="header-info">
+                    <h1>Student Bot</h1>
+                    <span class="status-text">Online • Ready to help</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+                    <span class="theme-icon sun">☀️</span>
+                    <span class="theme-icon moon">🌙</span>
+                </button>
+                <button class="help-btn" id="helpBtn" aria-label="Show help">
+                    <span>❓</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Messages Area -->
+        <main class="chat-messages" id="chatMessages" role="log" aria-live="polite">
+            <!-- Messages will be dynamically inserted here -->
+        </main>
+
+        <!-- Typing Indicator -->
+        <div class="typing-indicator" id="typingIndicator">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="chat-input-area">
+            <div class="input-container">
+                <input 
+                    type="text" 
+                    id="userInput" 
+                    class="chat-input" 
+                    placeholder="Type a message... (Press Enter to send)"
+                    autocomplete="off"
+                    aria-label="Message input"
+                >
+                <button class="send-btn" id="sendBtn" aria-label="Send message">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-hints">
+                <span>Try: "help" • "add a student" • "get student [name]"</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Student Form Modal -->
+    <div class="modal-overlay" id="studentFormModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add New Student</h2>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <form id="studentForm" class="student-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="studentName">Name *</label>
+                        <input type="text" id="studentName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="studentDept">Department *</label>
+                        <input type="text" id="studentDept" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="studentYear">Year *</label>
+                        <select id="studentYear" required>
+                            <option value="">Select Year</option>
+                            <option value="1">1st Year</option>
+                            <option value="2">2nd Year</option>
+                            <option value="3">3rd Year</option>
+                            <option value="4">4th Year</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="studentSection">Section *</label>
+                        <input type="text" id="studentSection" required maxlength="1">
+                    </div>
+                </div>
+                <div class="form-divider">
+                    <span>Marks (out of 100)</span>
+                </div>
+                <div class="form-row marks-row">
+                    <div class="form-group">
+                        <label for="marksMath">Math</label>
+                        <input type="number" id="marksMath" min="0" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="marksScience">Science</label>
+                        <input type="number" id="marksScience" min="0" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="marksEnglish">English</label>
+                        <input type="number" id="marksEnglish" min="0" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="marksProgramming">Programming</label>
+                        <input type="number" id="marksProgramming" min="0" max="100" required>
+                    </div>
+                </div>
+                <div class="form-group full-width">
+                    <label for="studentInfo">Additional Info</label>
+                    <textarea id="studentInfo" rows="2" placeholder="Any additional information..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="cancelForm">Cancel</button>
+                    <button type="submit" class="btn-primary">
+                        <span class="btn-text">Save Student</span>
+                        <span class="btn-loader"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Data Table Modal -->
+    <div class="modal-overlay" id="dataTableModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>Student Records</h2>
+                <button class="modal-close" id="tableModalClose">&times;</button>
+            </div>
+            <div class="table-container" id="tableContainer">
+                <!-- Table will be dynamically inserted -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/theme.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/chatbot.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
