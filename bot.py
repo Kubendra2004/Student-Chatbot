@@ -156,8 +156,8 @@ class RuntimeConfig:
             self.browser_host = ""
             self.browser_is_localhost = True
 
-        # Browser mode: environment variables are usually empty in Pyodide,
-        # so we also read .env from the same origin.
+        # Browser mode: environment variables are usually empty in Pyodide.
+        # Avoid fetching .env from browser to prevent 404s on static hosting.
         env_mode = os.getenv("DATA_MODE", "").strip()
         self.sheetdb_api_url = os.getenv("SHEETDB_API_URL", "").strip()
         self.local_excel_path = os.getenv("LOCAL_EXCEL_PATH", "chat.xlsx").strip() or "chat.xlsx"
@@ -177,60 +177,6 @@ class RuntimeConfig:
                     self.sheetdb_api_url = persisted
             except Exception:
                 pass
-
-        # Only try loading .env when running on localhost.
-        # Hosted static pages (like GitHub Pages) usually won't serve .env,
-        # which leads to noisy 404 errors.
-        needs_env_fetch = self.browser_is_localhost and (
-            not env_mode
-            or not self.sheetdb_api_url
-            or not self.local_api_url
-        )
-
-        if not needs_env_fetch:
-            requested_mode = self.data_mode
-            if not self.browser_is_localhost:
-                if requested_mode == "local":
-                    self.mode_notice = (
-                        "Local mode is only available on localhost. "
-                        "Switched to sheetdb mode for hosted frontend."
-                    )
-                self.data_mode = "sheetdb"
-            elif self.data_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
-                self.data_mode = "local"
-                self.mode_notice = (
-                    "SHEETDB_API_URL is missing/invalid on localhost. "
-                    "Using local mode."
-                )
-            return
-
-        try:
-            from js import fetch  # type: ignore
-
-            response = await _fetch_with_timeout(
-                fetch(".env"),
-                2.5,
-                "Loading .env timed out. Continuing with default settings.",
-            )
-            if response.ok:
-                text = await _fetch_with_timeout(
-                    response.text(),
-                    2.5,
-                    "Reading .env timed out. Continuing with default settings.",
-                )
-                values = _parse_env_text(text)
-                self.data_mode = self._normalize_mode(values.get("DATA_MODE", self.data_mode))
-                candidate = _normalize_sheetdb_url(values.get("SHEETDB_API_URL", "").strip())
-                if _is_valid_sheetdb_url(candidate):
-                    self.sheetdb_api_url = candidate
-                self.local_excel_path = (
-                    values.get("LOCAL_EXCEL_PATH", self.local_excel_path).strip() or "chat.xlsx"
-                )
-                self.local_api_url = (
-                    values.get("LOCAL_API_URL", self.local_api_url).strip() or "http://127.0.0.1:8001"
-                )
-        except Exception:
-            pass
 
         requested_mode = self.data_mode
         if not self.browser_is_localhost:
