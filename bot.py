@@ -9,6 +9,9 @@ from datetime import datetime
 from urllib.parse import quote
 
 DEFAULT_SHEETDB_API_URL = ""
+SHEETDB_BASE_URL = "https://sheetdb.io/api/v1/"
+SHEETDB_API_KEY_STORAGE_KEY = "studentbot-sheetdb-key"
+SHEETDB_API_URL_LEGACY_STORAGE_KEY = "studentbot-sheetdb-api"
 
 HELP_TEXT = (
     "Here's what I can help you with:\n\n"
@@ -24,7 +27,7 @@ HELP_TEXT = (
     "- set mode local\n"
     "- set mode local-storage\n"
     "- set mode sheetdb\n"
-    "- set sheetdb api <url>\n"
+    "- set sheetdb api <api_id_or_url>\n"
     "- reload env\n"
     "- current mode\n\n"
     "Chat\n"
@@ -77,6 +80,30 @@ def _parse_env_text(text: str) -> dict[str, str]:
 def _is_valid_sheetdb_url(value: str) -> bool:
     url = value.strip()
     return bool(url) and "YOUR_API_ID" not in url
+
+
+def _normalize_sheetdb_url(value: str) -> str:
+    candidate = value.strip().strip("/")
+    if not candidate or "YOUR_API_ID" in candidate:
+        return ""
+
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        return candidate
+
+    if all(ch.isalnum() or ch in "-_" for ch in candidate):
+        return f"{SHEETDB_BASE_URL}{candidate}"
+
+    return ""
+
+
+def _extract_sheetdb_key(value: str) -> str:
+    normalized = _normalize_sheetdb_url(value)
+    if not normalized:
+        return ""
+    marker = "/api/v1/"
+    if marker in normalized:
+        return normalized.split(marker, 1)[1].strip().strip("/")
+    return ""
 
 
 async def _fetch_with_timeout(coro, timeout_seconds: float, timeout_message: str):
@@ -137,7 +164,24 @@ class RuntimeConfig:
         self.local_api_url = os.getenv("LOCAL_API_URL", "http://127.0.0.1:8001").strip() or "http://127.0.0.1:8001"
         self.data_mode = self._normalize_mode(env_mode or "local")
 
-        needs_env_fetch = (
+        # On hosted pages, restore SheetDB configuration from local storage
+        # so users don't need to re-enter the API key on every refresh.
+        if not self.browser_is_localhost:
+            try:
+                from js import localStorage  # type: ignore
+
+                saved_key = str(localStorage.getItem(SHEETDB_API_KEY_STORAGE_KEY) or "").strip()
+                saved_url = str(localStorage.getItem(SHEETDB_API_URL_LEGACY_STORAGE_KEY) or "").strip()
+                persisted = _normalize_sheetdb_url(saved_key) or _normalize_sheetdb_url(saved_url)
+                if persisted:
+                    self.sheetdb_api_url = persisted
+            except Exception:
+                pass
+
+        # Only try loading .env when running on localhost.
+        # Hosted static pages (like GitHub Pages) usually won't serve .env,
+        # which leads to noisy 404 errors.
+        needs_env_fetch = self.browser_is_localhost and (
             not env_mode
             or not self.sheetdb_api_url
             or not self.local_api_url
@@ -176,7 +220,7 @@ class RuntimeConfig:
                 )
                 values = _parse_env_text(text)
                 self.data_mode = self._normalize_mode(values.get("DATA_MODE", self.data_mode))
-                candidate = values.get("SHEETDB_API_URL", "").strip()
+                candidate = _normalize_sheetdb_url(values.get("SHEETDB_API_URL", "").strip())
                 if _is_valid_sheetdb_url(candidate):
                     self.sheetdb_api_url = candidate
                 self.local_excel_path = (
@@ -866,7 +910,7 @@ class BrowserChatApp:
                 self.add_message(
                     "bot",
                     "Cannot switch to sheetdb mode because SHEETDB_API_URL is missing or invalid in .env. "
-                    "Type: set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID or use set mode local-storage",
+                    "Type: set sheetdb api YOUR_API_ID (or full URL) or use set mode local-storage",
                 )
             return False
 
@@ -898,9 +942,11 @@ class BrowserChatApp:
         try:
             from js import localStorage  # type: ignore
 
-            saved_api = localStorage.getItem("studentbot-sheetdb-api")
-            if saved_api and _is_valid_sheetdb_url(str(saved_api)):
-                RUNTIME_CONFIG.sheetdb_api_url = str(saved_api).strip()
+            saved_key = str(localStorage.getItem(SHEETDB_API_KEY_STORAGE_KEY) or "").strip()
+            saved_api = str(localStorage.getItem(SHEETDB_API_URL_LEGACY_STORAGE_KEY) or "").strip()
+            persisted = _normalize_sheetdb_url(saved_key) or _normalize_sheetdb_url(saved_api)
+            if persisted and _is_valid_sheetdb_url(persisted):
+                RUNTIME_CONFIG.sheetdb_api_url = persisted
 
             saved_mode = localStorage.getItem("studentbot-data-mode")
             if saved_mode:
@@ -1080,17 +1126,21 @@ class BrowserChatApp:
 
         if lower.startswith("set sheetdb api"):
             candidate = text[len("set sheetdb api") :].strip()
-            if not _is_valid_sheetdb_url(candidate):
+            normalized = _normalize_sheetdb_url(candidate)
+            if not _is_valid_sheetdb_url(normalized):
                 self.add_message(
                     "bot",
-                    "Invalid SheetDB URL. Expected format: https://sheetdb.io/api/v1/YOUR_API_ID",
+                    "Invalid SheetDB API value. Use: set sheetdb api YOUR_API_ID (or full URL).",
                 )
                 return
-            RUNTIME_CONFIG.sheetdb_api_url = candidate
+            RUNTIME_CONFIG.sheetdb_api_url = normalized
             try:
                 from js import localStorage  # type: ignore
 
-                localStorage.setItem("studentbot-sheetdb-api", candidate)
+                api_key = _extract_sheetdb_key(normalized)
+                if api_key:
+                    localStorage.setItem(SHEETDB_API_KEY_STORAGE_KEY, api_key)
+                localStorage.setItem(SHEETDB_API_URL_LEGACY_STORAGE_KEY, normalized)
             except Exception:
                 pass
             await self._set_frontend_mode("sheetdb")
@@ -1595,7 +1645,7 @@ def _start_browser_app() -> bool:
                 app.add_message(
                     "bot",
                     "Configuration is missing. On GitHub Pages, type: "
-                    "set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID",
+                    "set sheetdb api YOUR_API_ID",
                 )
 
         asyncio.create_task(_bootstrap())

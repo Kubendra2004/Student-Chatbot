@@ -65,7 +65,7 @@ Frontend local mode reads/writes Excel through a local Python API server (`local
 - `set mode local`
 - `set mode local-storage`
 - `set mode sheetdb`
-- `set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID`
+- `set sheetdb api YOUR_API_ID` (or full SheetDB URL)
 - `reload env`
 - `current mode`
 
@@ -128,3 +128,4 @@ Your bot will run fully client-side with Python through PyScript.
 - On GitHub Pages, files are public static assets. If you publish `.env`, your SheetDB URL is public.
 - First load can take longer than a normal JS page because PyScript downloads Python runtime files.
 - The app now shows UI immediately and loads configuration in the background to reduce page-freeze issues.
+- In hosted mode, the SheetDB API key is saved in browser local storage and reused on next load.
