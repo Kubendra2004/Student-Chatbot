@@ -15,6 +15,7 @@ HELP_TEXT = (
     "Student Management\n"
     "- add a student\n"
     "- update student\n"
+    "- update student <name>\n"
     "- get student <name>\n"
     "- get total <name>\n\n"
     "View Data\n"
@@ -29,7 +30,10 @@ HELP_TEXT = (
     "Chat\n"
     "- hi / hello / hey\n"
     "- tell me a fact\n"
-    "- help"
+    "- help\n\n"
+    "Notes\n"
+    "- First load can take longer because Python runs in the browser.\n"
+    "- On hosted pages, local mode is disabled; use sheetdb mode."
 )
 
 
@@ -73,6 +77,13 @@ def _parse_env_text(text: str) -> dict[str, str]:
 def _is_valid_sheetdb_url(value: str) -> bool:
     url = value.strip()
     return bool(url) and "YOUR_API_ID" not in url
+
+
+async def _fetch_with_timeout(coro, timeout_seconds: float, timeout_message: str):
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_seconds)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(timeout_message) from exc
 
 
 def _load_local_env_file(path: str = ".env") -> dict[str, str]:
@@ -152,9 +163,17 @@ class RuntimeConfig:
         try:
             from js import fetch  # type: ignore
 
-            response = await fetch(".env")
+            response = await _fetch_with_timeout(
+                fetch(".env"),
+                2.5,
+                "Loading .env timed out. Continuing with default settings.",
+            )
             if response.ok:
-                text = await response.text()
+                text = await _fetch_with_timeout(
+                    response.text(),
+                    2.5,
+                    "Reading .env timed out. Continuing with default settings.",
+                )
                 values = _parse_env_text(text)
                 self.data_mode = self._normalize_mode(values.get("DATA_MODE", self.data_mode))
                 candidate = values.get("SHEETDB_API_URL", "").strip()
@@ -441,11 +460,19 @@ class StudentSheetAPI:
         if payload is not None:
             options["body"] = json.dumps(payload)
 
-        response = await fetch(url, to_js(options))
+        response = await _fetch_with_timeout(
+            fetch(url, to_js(options)),
+            8.0,
+            "Request timed out while contacting SheetDB.",
+        )
         if not response.ok:
             raise RuntimeError(f"HTTP error {response.status}")
 
-        text = await response.text()
+        text = await _fetch_with_timeout(
+            response.text(),
+            8.0,
+            "Timed out while reading SheetDB response.",
+        )
         return json.loads(text) if text else None
 
     @classmethod
@@ -588,15 +615,27 @@ class BrowserLocalStoreAPI:
             options["body"] = json.dumps(payload)
 
         try:
-            response = await fetch(f"{BrowserLocalStoreAPI._base_url()}{path}", to_js(options))
+            response = await _fetch_with_timeout(
+                fetch(f"{BrowserLocalStoreAPI._base_url()}{path}", to_js(options)),
+                5.0,
+                "Local API request timed out.",
+            )
         except Exception as exc:
             raise RuntimeError(
                 "Local API is unreachable. Start local_excel_api_server.py and verify LOCAL_API_URL in .env"
             ) from exc
         if not response.ok:
-            text = await response.text()
+            text = await _fetch_with_timeout(
+                response.text(),
+                3.0,
+                "Timed out while reading Local API error response.",
+            )
             raise RuntimeError(text or f"HTTP error {response.status}")
-        text = await response.text()
+        text = await _fetch_with_timeout(
+            response.text(),
+            5.0,
+            "Timed out while reading Local API response.",
+        )
         return json.loads(text) if text else None
 
     @classmethod
@@ -1320,11 +1359,7 @@ class BrowserChatApp:
         )
 
         self.add_message("bot", random.choice(GREETINGS))
-        self.add_message(
-            "bot",
-            "Python Student Bot is ready. Type help for commands.\n"
-            f"Active mode: {RUNTIME_CONFIG.data_mode}.",
-        )
+        self.add_message("bot", "Python Student Bot is ready. Type help for commands.")
 
     async def handle_form_submit(self):
         submit_btn = self.student_form.querySelector(".btn-primary")
@@ -1542,9 +1577,16 @@ def _start_browser_app() -> bool:
         from pyscript import document  # type: ignore  # noqa: F401
 
         async def _bootstrap():
-            await RUNTIME_CONFIG.load_browser_env()
             app = BrowserChatApp()
             app.start()
+
+            # Render UI first, then resolve configuration in background
+            # so slow network requests do not delay first interaction.
+            app.add_message("bot", "Loading configuration...")
+            await RUNTIME_CONFIG.load_browser_env()
+            app._bind_api_for_mode()
+            app._load_saved_frontend_mode()
+            app.add_message("bot", f"Active mode: {RUNTIME_CONFIG.data_mode}")
 
             if RUNTIME_CONFIG.mode_notice:
                 app.add_message("bot", RUNTIME_CONFIG.mode_notice)
