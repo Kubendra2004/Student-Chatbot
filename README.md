@@ -29,14 +29,28 @@ This project now runs the chatbot logic in Python in the browser using PyScript.
 
 4. Copy `.env.example` to `.env` and set:
 
+   `DATA_MODE=sheetdb`
+
    `SHEETDB_API_URL=https://sheetdb.io/api/v1/your_api_id`
 
 Optional local file backend path:
 
 `LOCAL_EXCEL_PATH=chat.xlsx`
 
-The app reads `SHEETDB_API_URL` from `.env` in browser mode and CLI mode.
+The app reads configuration from `.env`.
+You can switch mode with `DATA_MODE`:
+
+- `DATA_MODE=sheetdb`: use SheetDB backend
+- `DATA_MODE=local`: use local backend
+
+Hosted frontend behavior:
+
+- On GitHub-hosted frontend, app forces `sheetdb` mode automatically.
+- `local` mode is allowed only on `localhost`.
+- If someone tries `set mode local` on GitHub Pages, a clear message is shown.
+
 CLI local mode reads and updates the Excel file at `LOCAL_EXCEL_PATH` (default: `chat.xlsx`).
+Frontend local mode reads/writes Excel through a local Python API server (`local_excel_api_server.py`).
 
 ## Commands
 
@@ -47,6 +61,9 @@ CLI local mode reads and updates the Excel file at `LOCAL_EXCEL_PATH` (default: 
 - `get student <name>`
 - `get total <name>`
 - `show all students`
+- `set mode local`
+- `set mode sheetdb`
+- `current mode`
 
 Update behavior:
 
@@ -73,6 +90,23 @@ python bot.py
 ```
 
 This mode supports add/update/get/total/show-all directly in the local Excel file.
+
+To test local mode in browser, set:
+
+`DATA_MODE=local`
+
+Start the local Excel API server:
+
+```powershell
+pip install openpyxl
+python local_excel_api_server.py
+```
+
+Then start the frontend static server in another terminal:
+
+```powershell
+python -m http.server 5500
+```
 
 ## Deploy on GitHub Pages
 

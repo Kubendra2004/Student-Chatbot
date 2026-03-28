@@ -19,6 +19,11 @@ HELP_TEXT = (
     "- get total <name>\n\n"
     "View Data\n"
     "- show all students\n\n"
+    "Mode Control (Frontend)\n"
+    "- set mode local\n"
+    "- set mode sheetdb\n"
+    "- reload env\n"
+    "- current mode\n\n"
     "Chat\n"
     "- hi / hello / hey\n"
     "- tell me a fact\n"
@@ -63,6 +68,11 @@ def _parse_env_text(text: str) -> dict[str, str]:
     return values
 
 
+def _is_valid_sheetdb_url(value: str) -> bool:
+    url = value.strip()
+    return bool(url) and "YOUR_API_ID" not in url
+
+
 def _load_local_env_file(path: str = ".env") -> dict[str, str]:
     if not os.path.exists(path):
         return {}
@@ -74,14 +84,67 @@ def _load_local_env_file(path: str = ".env") -> dict[str, str]:
 class RuntimeConfig:
     sheetdb_api_url: str = ""
     local_excel_path: str = "chat.xlsx"
+    local_api_url: str = "http://127.0.0.1:8001"
+    data_mode: str = "local"
+    browser_host: str = ""
+    browser_is_localhost: bool = True
+    mode_notice: str = ""
 
     def configured(self) -> bool:
-        return bool(self.sheetdb_api_url)
+        return self.data_mode == "local" or bool(self.sheetdb_api_url)
+
+    def using_sheetdb(self) -> bool:
+        return self.data_mode == "sheetdb"
+
+    def using_local(self) -> bool:
+        return self.data_mode == "local"
+
+    @staticmethod
+    def _normalize_mode(value: str) -> str:
+        mode = value.strip().lower()
+        return mode if mode in {"sheetdb", "local"} else "sheetdb"
 
     async def load_browser_env(self):
+        self.mode_notice = ""
+
+        try:
+            from js import window  # type: ignore
+
+            self.browser_host = str(window.location.hostname)
+            self.browser_is_localhost = self.browser_host in {"localhost", "127.0.0.1", "::1"}
+        except Exception:
+            self.browser_host = ""
+            self.browser_is_localhost = True
+
+        # Browser mode: environment variables are usually empty in Pyodide,
+        # so we also read .env from the same origin.
+        env_mode = os.getenv("DATA_MODE", "").strip()
         self.sheetdb_api_url = os.getenv("SHEETDB_API_URL", "").strip()
         self.local_excel_path = os.getenv("LOCAL_EXCEL_PATH", "chat.xlsx").strip() or "chat.xlsx"
-        if self.sheetdb_api_url:
+        self.local_api_url = os.getenv("LOCAL_API_URL", "http://127.0.0.1:8001").strip() or "http://127.0.0.1:8001"
+        self.data_mode = self._normalize_mode(env_mode or "local")
+
+        needs_env_fetch = (
+            not env_mode
+            or not self.sheetdb_api_url
+            or not self.local_api_url
+        )
+
+        if not needs_env_fetch:
+            requested_mode = self.data_mode
+            if not self.browser_is_localhost:
+                if requested_mode == "local":
+                    self.mode_notice = (
+                        "Local mode is only available on localhost. "
+                        "Switched to sheetdb mode for hosted frontend."
+                    )
+                self.data_mode = "sheetdb"
+            elif self.data_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
+                self.data_mode = "local"
+                self.mode_notice = (
+                    "SHEETDB_API_URL is missing/invalid on localhost. "
+                    "Using local mode."
+                )
             return
 
         try:
@@ -91,23 +154,65 @@ class RuntimeConfig:
             if response.ok:
                 text = await response.text()
                 values = _parse_env_text(text)
-                self.sheetdb_api_url = values.get("SHEETDB_API_URL", "").strip()
-                self.local_excel_path = values.get("LOCAL_EXCEL_PATH", self.local_excel_path).strip() or "chat.xlsx"
+                self.data_mode = self._normalize_mode(values.get("DATA_MODE", self.data_mode))
+                candidate = values.get("SHEETDB_API_URL", "").strip()
+                if _is_valid_sheetdb_url(candidate):
+                    self.sheetdb_api_url = candidate
+                self.local_excel_path = (
+                    values.get("LOCAL_EXCEL_PATH", self.local_excel_path).strip() or "chat.xlsx"
+                )
+                self.local_api_url = (
+                    values.get("LOCAL_API_URL", self.local_api_url).strip() or "http://127.0.0.1:8001"
+                )
         except Exception:
             pass
 
+        requested_mode = self.data_mode
+        if not self.browser_is_localhost:
+            if requested_mode == "local":
+                self.mode_notice = (
+                    "Local mode is only available on localhost. "
+                    "Switched to sheetdb mode for hosted frontend."
+                )
+            self.data_mode = "sheetdb"
+        elif self.data_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
+            self.data_mode = "local"
+            self.mode_notice = (
+                "SHEETDB_API_URL is missing/invalid on localhost. "
+                "Using local mode."
+            )
+
     def load_cli_env(self):
-        self.sheetdb_api_url = os.getenv("SHEETDB_API_URL", "").strip()
-        self.local_excel_path = os.getenv("LOCAL_EXCEL_PATH", "chat.xlsx").strip() or "chat.xlsx"
-        if self.sheetdb_api_url:
-            return
-
         values = _load_local_env_file()
-        self.sheetdb_api_url = values.get("SHEETDB_API_URL", "").strip()
-        self.local_excel_path = values.get("LOCAL_EXCEL_PATH", self.local_excel_path).strip() or "chat.xlsx"
+
+        self.sheetdb_api_url = (
+            os.getenv("SHEETDB_API_URL")
+            or values.get("SHEETDB_API_URL", "")
+        ).strip()
+
+        self.local_excel_path = (
+            os.getenv("LOCAL_EXCEL_PATH")
+            or values.get("LOCAL_EXCEL_PATH", "chat.xlsx")
+            or "chat.xlsx"
+        ).strip()
+
+        self.local_api_url = (
+            os.getenv("LOCAL_API_URL")
+            or values.get("LOCAL_API_URL", "http://127.0.0.1:8001")
+            or "http://127.0.0.1:8001"
+        ).strip()
+
+        self.data_mode = self._normalize_mode(
+            os.getenv("DATA_MODE", values.get("DATA_MODE", "local"))
+        )
 
 
-RUNTIME_CONFIG = RuntimeConfig(sheetdb_api_url=DEFAULT_SHEETDB_API_URL, local_excel_path="chat.xlsx")
+RUNTIME_CONFIG = RuntimeConfig(
+    sheetdb_api_url=DEFAULT_SHEETDB_API_URL,
+    local_excel_path="chat.xlsx",
+    local_api_url="http://127.0.0.1:8001",
+    data_mode="local",
+)
 
 
 STUDENT_COLUMNS = [
@@ -463,6 +568,69 @@ class StudentSheetAPI:
         }
 
 
+class BrowserLocalStoreAPI:
+    @staticmethod
+    def _base_url() -> str:
+        return RUNTIME_CONFIG.local_api_url.rstrip("/")
+
+    @staticmethod
+    async def _fetch_json(path: str, method: str = "GET", payload: dict | None = None):
+        from js import fetch  # type: ignore
+        from pyodide.ffi import to_js  # type: ignore
+
+        options = {
+            "method": method,
+            "headers": {"Content-Type": "application/json"},
+        }
+        if payload is not None:
+            options["body"] = json.dumps(payload)
+
+        try:
+            response = await fetch(f"{BrowserLocalStoreAPI._base_url()}{path}", to_js(options))
+        except Exception as exc:
+            raise RuntimeError(
+                "Local API is unreachable. Start local_excel_api_server.py and verify LOCAL_API_URL in .env"
+            ) from exc
+        if not response.ok:
+            text = await response.text()
+            raise RuntimeError(text or f"HTTP error {response.status}")
+        text = await response.text()
+        return json.loads(text) if text else None
+
+    @classmethod
+    async def get_all_students(cls):
+        return await cls._fetch_json("/students")
+
+    @classmethod
+    async def get_student_by_name(cls, name: str):
+        return await cls._fetch_json(f"/students/search?name={quote(name)}")
+
+    @classmethod
+    async def get_student_by_name_exact(cls, name: str):
+        return await cls._fetch_json(f"/students/exact?name={quote(name)}")
+
+    @classmethod
+    async def suggest_student_names(cls, typed_name: str, limit: int = 5) -> list[str]:
+        data = await cls._fetch_json(
+            f"/students/suggest?name={quote(typed_name)}&limit={int(limit)}"
+        )
+        return data or []
+
+    @classmethod
+    async def add_student(cls, student: dict):
+        return await cls._fetch_json("/students", method="POST", payload=student)
+
+    @classmethod
+    async def update_student(cls, name: str, update_data: dict):
+        return await cls._fetch_json(
+            f"/students/{quote(name)}", method="PATCH", payload=update_data
+        )
+
+    @classmethod
+    async def get_student_total(cls, name: str):
+        return await cls._fetch_json(f"/students/total?name={quote(name)}")
+
+
 class BrowserChatApp:
     def __init__(self):
         from pyscript import document  # type: ignore
@@ -485,6 +653,64 @@ class BrowserChatApp:
         self.form_mode = "add"
         self.update_target_name = ""
         self._proxies = []
+        self.api = None
+        self._bind_api_for_mode()
+
+    def _bind_api_for_mode(self):
+        self.api = StudentSheetAPI if RUNTIME_CONFIG.using_sheetdb() else BrowserLocalStoreAPI
+
+    def _set_frontend_mode_sync(self, mode: str, announce: bool = True, persist: bool = True) -> bool:
+        target = RuntimeConfig._normalize_mode(mode)
+
+        if target == "local" and not RUNTIME_CONFIG.browser_is_localhost:
+            if announce:
+                self.add_message(
+                    "bot",
+                    "Local mode is only available on localhost. On GitHub Pages, use sheetdb mode.",
+                )
+            return False
+
+        if target == "sheetdb" and not _is_valid_sheetdb_url(RUNTIME_CONFIG.sheetdb_api_url):
+            if announce:
+                self.add_message(
+                    "bot",
+                    "Cannot switch to sheetdb mode because SHEETDB_API_URL is missing or invalid in .env.",
+                )
+            return False
+
+        RUNTIME_CONFIG.data_mode = target
+        self._bind_api_for_mode()
+
+        if persist:
+            try:
+                from js import localStorage  # type: ignore
+
+                localStorage.setItem("studentbot-data-mode", target)
+            except Exception:
+                pass
+
+        if announce:
+            self.add_message("bot", f"Switched mode to {target}.")
+        return True
+
+    async def _set_frontend_mode(self, mode: str, announce: bool = True, persist: bool = True) -> bool:
+        target = RuntimeConfig._normalize_mode(mode)
+
+        if target == "sheetdb" and not _is_valid_sheetdb_url(RUNTIME_CONFIG.sheetdb_api_url):
+            # Try a fresh config reload before failing mode switch.
+            await RUNTIME_CONFIG.load_browser_env()
+
+        return self._set_frontend_mode_sync(target, announce=announce, persist=persist)
+
+    def _load_saved_frontend_mode(self):
+        try:
+            from js import localStorage  # type: ignore
+
+            saved_mode = localStorage.getItem("studentbot-data-mode")
+            if saved_mode:
+                self._set_frontend_mode_sync(str(saved_mode), announce=False, persist=False)
+        except Exception:
+            pass
 
     def _keep_proxy(self, proxy):
         self._proxies.append(proxy)
@@ -588,9 +814,9 @@ class BrowserChatApp:
         self.update_target_name = ""
 
     async def preload_student_for_update(self, name: str):
-        student = await StudentSheetAPI.get_student_by_name_exact(name)
+        student = await self.api.get_student_by_name_exact(name)
         if not student:
-            suggestions = await StudentSheetAPI.suggest_student_names(name)
+            suggestions = await self.api.suggest_student_names(name)
             if suggestions:
                 suggested_text = "\n".join(f"- {item}" for item in suggestions)
                 self.add_message(
@@ -650,6 +876,24 @@ class BrowserChatApp:
 
         if lower in {"help", "?"}:
             self.add_message("bot", HELP_TEXT)
+            return
+
+        if lower in {"current mode", "show mode", "mode"}:
+            self.add_message("bot", f"Active mode: {RUNTIME_CONFIG.data_mode}")
+            return
+
+        if lower in {"reload env", "refresh env"}:
+            await RUNTIME_CONFIG.load_browser_env()
+            self._bind_api_for_mode()
+            self.add_message("bot", f"Environment reloaded. Active mode: {RUNTIME_CONFIG.data_mode}")
+            return
+
+        if lower.startswith("set mode"):
+            target = lower[len("set mode") :].strip()
+            if not target:
+                self.add_message("bot", "Usage: set mode local OR set mode sheetdb")
+                return
+            await self._set_frontend_mode(target)
             return
 
         if lower in {"hi", "hello", "hey"}:
@@ -751,10 +995,10 @@ class BrowserChatApp:
             self.pending_student["Info"] = "" if message.strip() == "-" else message.strip()
 
             try:
-                await StudentSheetAPI.add_student(self.pending_student)
+                await self.api.add_student(self.pending_student)
                 self.add_message(
                     "bot",
-                    f"Student {self.pending_student['Name']} saved successfully to Google Sheets.",
+                    f"Student {self.pending_student['Name']} saved successfully.",
                 )
             except Exception as exc:
                 self.add_message("bot", f"Could not save student. Error: {exc}")
@@ -764,7 +1008,7 @@ class BrowserChatApp:
 
     async def _get_student(self, name: str):
         try:
-            student = await StudentSheetAPI.get_student_by_name(name)
+            student = await self.api.get_student_by_name(name)
             if not student:
                 self.add_message("bot", f"No student found with name: {name}")
                 return
@@ -794,7 +1038,7 @@ class BrowserChatApp:
 
     async def _get_total(self, name: str):
         try:
-            result = await StudentSheetAPI.get_student_total(name)
+            result = await self.api.get_student_total(name)
             if not result:
                 self.add_message("bot", f"No student found with name: {name}")
                 return
@@ -812,7 +1056,7 @@ class BrowserChatApp:
 
     async def _show_all(self):
         try:
-            students = await StudentSheetAPI.get_all_students()
+            students = await self.api.get_all_students()
             if not students:
                 self.add_message("bot", "No students found in your sheet.")
                 return
@@ -852,6 +1096,7 @@ class BrowserChatApp:
         from pyodide.ffi import create_proxy  # type: ignore
 
         self.init_theme()
+        self._load_saved_frontend_mode()
 
         async def on_send(_event=None):
             await self.handle_send()
@@ -903,7 +1148,7 @@ class BrowserChatApp:
         self.add_message(
             "bot",
             "Python Student Bot is ready. Type help for commands.\n"
-            "Data is stored in Google Sheets through SheetDB.",
+            f"Active mode: {RUNTIME_CONFIG.data_mode}.",
         )
 
     async def handle_form_submit(self):
@@ -925,11 +1170,11 @@ class BrowserChatApp:
         try:
             if self.form_mode == "update":
                 target_name = self.update_target_name or data["Name"]
-                await StudentSheetAPI.update_student(target_name, data)
+                await self.api.update_student(target_name, data)
                 self.add_message("bot", f"Student {data['Name']} updated successfully.")
                 self.toast("Student updated successfully", "success")
             else:
-                await StudentSheetAPI.add_student(data)
+                await self.api.add_student(data)
                 self.add_message("bot", f"Student {data['Name']} added successfully.")
                 self.toast("Student added successfully", "success")
 
@@ -943,7 +1188,47 @@ class BrowserChatApp:
 
 def _run_cli_chatbot():
     RUNTIME_CONFIG.load_cli_env()
-    backend = LocalExcelAPI(RUNTIME_CONFIG.local_excel_path)
+    backend_kind = RUNTIME_CONFIG.data_mode
+    backend = None
+
+    if backend_kind == "local":
+        backend = LocalExcelAPI(RUNTIME_CONFIG.local_excel_path)
+    else:
+        if not RUNTIME_CONFIG.sheetdb_api_url:
+            raise RuntimeError(
+                "DATA_MODE=sheetdb requires SHEETDB_API_URL in .env or environment variables"
+            )
+
+        class _SheetDBSyncAdapter:
+            @staticmethod
+            def add_student(data: dict):
+                return asyncio.run(StudentSheetAPI.add_student(data))
+
+            @staticmethod
+            def update_student(name: str, data: dict):
+                return asyncio.run(StudentSheetAPI.update_student(name, data))
+
+            @staticmethod
+            def get_student_by_name(name: str):
+                return asyncio.run(StudentSheetAPI.get_student_by_name(name))
+
+            @staticmethod
+            def get_student_by_name_exact(name: str):
+                return asyncio.run(StudentSheetAPI.get_student_by_name_exact(name))
+
+            @staticmethod
+            def suggest_student_names(name: str, limit: int = 5):
+                return asyncio.run(StudentSheetAPI.suggest_student_names(name, limit))
+
+            @staticmethod
+            def get_student_total(name: str):
+                return asyncio.run(StudentSheetAPI.get_student_total(name))
+
+            @staticmethod
+            def get_all_students():
+                return asyncio.run(StudentSheetAPI.get_all_students())
+
+        backend = _SheetDBSyncAdapter()
 
     def _print_student(student: dict):
         print("Chatbot: Here's what I found:")
@@ -994,9 +1279,11 @@ def _run_cli_chatbot():
         return data
 
     print("Hi! Python Student Bot CLI mode")
-    print(f"Local Excel backend active: {RUNTIME_CONFIG.local_excel_path}")
-    if RUNTIME_CONFIG.configured():
-        print("SheetDB URL detected, but CLI local mode uses Excel by design.")
+    print(f"Active mode: {backend_kind}")
+    if backend_kind == "local":
+        print(f"Local Excel backend active: {RUNTIME_CONFIG.local_excel_path}")
+    else:
+        print("SheetDB backend active")
     print("Type 'exit' to quit.")
 
     while True:
@@ -1083,10 +1370,14 @@ def _start_browser_app() -> bool:
             await RUNTIME_CONFIG.load_browser_env()
             app = BrowserChatApp()
             app.start()
+
+            if RUNTIME_CONFIG.mode_notice:
+                app.add_message("bot", RUNTIME_CONFIG.mode_notice)
+
             if not RUNTIME_CONFIG.configured():
                 app.add_message(
                     "bot",
-                    "SHEETDB_API_URL is not configured. Add it to .env (and .env.example for template).",
+                    "Configuration is missing. Set DATA_MODE and related keys in .env.",
                 )
 
         asyncio.create_task(_bootstrap())
