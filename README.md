@@ -1,193 +1,90 @@
-<div align="center">
+# Student Bot (Python-Only, GitHub Pages Ready)
 
-# 🤖 Student Bot
+This project now runs the chatbot logic in Python in the browser using PyScript.
 
-### An Interactive Student Information Chatbot
+- Frontend shell: HTML + CSS
+- Main application logic: Python (`bot.py`)
+- Database: Google Sheets via SheetDB REST API
+- Hosting target: GitHub Pages
 
-[![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML)
-[![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/CSS)
-[![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
-[![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?style=for-the-badge&logo=google-sheets&logoColor=white)](https://www.google.com/sheets/about/)
+## What Changed
 
-<br>
+- Removed runtime dependency on the JavaScript app files.
+- `index.html` now loads PyScript and runs `bot.py` directly.
+- `bot.py` now handles:
+  - chat command parsing
+  - Google Sheets data operations through SheetDB
+  - rendering chat/table UI output in the page
 
-![Dark Mode](https://img.shields.io/badge/Theme-Dark%20Mode-0f172a?style=flat-square)
-![Light Mode](https://img.shields.io/badge/Theme-Light%20Mode-f8fafc?style=flat-square)
-![Responsive](https://img.shields.io/badge/Responsive-Mobile%20Ready-10b981?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-6366f1?style=flat-square)
+## Google Sheets + SheetDB Setup
 
----
+1. Create a Google Sheet with these headers:
 
-**A modern, feature-rich chatbot for managing student records with a stunning UI and real-time Google Sheets integration.**
+   `Name, Department, Year, Section, Math, Science, English, Programming, Info, Total, Percentage`
 
-[Live Demo](#-live-demo) • [Features](#-features) • [Quick Start](#-quick-start) • [Commands](#-commands)
+2. Create an API in SheetDB connected to that sheet.
+3. Copy your SheetDB endpoint, for example:
 
-</div>
+   `https://sheetdb.io/api/v1/your_api_id`
 
----
+4. Copy `.env.example` to `.env` and set:
 
-## ✨ Features
+   `SHEETDB_API_URL=https://sheetdb.io/api/v1/your_api_id`
 
-<table>
-<tr>
-<td width="50%">
+Optional local file backend path:
 
-### 🎨 Modern Design
-- Glassmorphism UI with gradient accents
-- Smooth animations & transitions
-- Floating background shapes
-- Beautiful data tables
+`LOCAL_EXCEL_PATH=chat.xlsx`
 
-</td>
-<td width="50%">
+The app reads `SHEETDB_API_URL` from `.env` in browser mode and CLI mode.
+CLI local mode reads and updates the Excel file at `LOCAL_EXCEL_PATH` (default: `chat.xlsx`).
 
-### 🌓 Theme Support
-- Dark / Light mode toggle
-- Automatic theme persistence
-- System preference detection
-- Smooth theme transitions
+## Commands
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+- `help`
+- `hi` / `hello`
+- `tell me a fact`
+- `add a student`
+- `get student <name>`
+- `get total <name>`
+- `show all students`
 
-### 💬 Smart Chat
-- Natural language commands
-- Typing indicators
-- Enter to send
-- Toast notifications
+Update behavior:
 
-</td>
-<td width="50%">
+- `update student <name>` now requires an exact student name match (case-insensitive).
+- If exact match fails, the bot suggests close student names to help you pick the right one.
 
-### 📊 Data Management
-- Add / Update students
-- View individual records
-- List all students
-- Auto-calculated grades
+## Run Locally
 
-</td>
-</tr>
-</table>
+You can test quickly using a local static server:
 
----
-
-## 🚀 Quick Start
-
-### 1️⃣ Set Up Google Sheets
-
-Create a new Google Sheet with these columns:
-
-| Name | Department | Year | Section | Math | Science | English | Programming | Info | Total | Percentage |
-|------|------------|------|---------|------|---------|---------|-------------|------|-------|------------|
-
-### 2️⃣ Connect to SheetDB
-
-1. Go to [SheetDB.io](https://sheetdb.io/) and sign up (free)
-2. Click **"Create new API"**
-3. Paste your Google Sheets URL
-4. Copy your API ID
-
-### 3️⃣ Configure the Bot
-
-Edit `js/config.js` and replace `YOUR_API_ID`:
-
-```javascript
-SHEETDB_API_URL: 'https://sheetdb.io/api/v1/YOUR_API_ID',
+```powershell
+python -m http.server 5500
 ```
 
-### 4️⃣ Launch
+Then open:
 
-Simply open `index.html` in your browser! 🎉
+`http://localhost:5500`
 
----
+Local Excel CLI mode:
 
-## 💬 Commands
-
-| Command | Description |
-|---------|-------------|
-| `help` | 📖 Show all available commands |
-| `add a student` | ➕ Open form to add new student |
-| `get student [name]` | 🔍 View student information |
-| `get total [name]` | 📊 View marks and percentage |
-| `show all students` | 📋 List all student records |
-| `hi` / `hello` | 👋 Get a friendly greeting |
-| `tell me a fact` | 🎲 Get a random fun fact |
-
----
-
-## 📁 Project Structure
-
-```
-Student-Chatbot/
-├── 📄 index.html           # Main page
-├── 📁 css/
-│   └── 🎨 styles.css       # Themes & animations
-├── 📁 js/
-│   ├── ⚙️ config.js        # Configuration
-│   ├── 🌓 theme.js         # Theme manager
-│   ├── 🔌 api.js           # SheetDB integration
-│   ├── 🤖 chatbot.js       # Bot logic
-│   └── 🎮 app.js           # Main controller
-└── 📖 README.md            # Documentation
+```powershell
+pip install openpyxl
+python bot.py
 ```
 
----
+This mode supports add/update/get/total/show-all directly in the local Excel file.
 
-## 🛠️ Tech Stack
+## Deploy on GitHub Pages
 
-<div align="center">
+1. Push this project to GitHub.
+2. In repository settings, open Pages.
+3. Set source to your main branch (root folder).
+4. Save and wait for deployment.
 
-| Technology | Purpose |
-|------------|---------|
-| ![HTML5](https://img.shields.io/badge/-HTML5-E34F26?style=flat-square&logo=html5&logoColor=white) | Structure & Semantics |
-| ![CSS3](https://img.shields.io/badge/-CSS3-1572B6?style=flat-square&logo=css3&logoColor=white) | Styling & Animations |
-| ![JavaScript](https://img.shields.io/badge/-JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black) | Logic & Interactivity |
-| ![Google Sheets](https://img.shields.io/badge/-Google%20Sheets-34A853?style=flat-square&logo=google-sheets&logoColor=white) | Database Storage |
-| ![SheetDB](https://img.shields.io/badge/-SheetDB-4285F4?style=flat-square&logo=google&logoColor=white) | REST API Layer |
+Your bot will run fully client-side with Python through PyScript.
 
-</div>
+## Notes
 
----
-
-## 🎨 Customization
-
-### Change Theme Colors
-
-Edit CSS variables in `css/styles.css`:
-
-```css
-:root {
-    --primary: #6366f1;      /* Accent color */
-    --bg-primary: #0f172a;   /* Background */
-    --success: #10b981;      /* Success state */
-}
-```
-
-### Add Greetings
-
-Edit the `GREETINGS` array in `js/config.js`:
-
-```javascript
-GREETINGS: [
-    "Your custom greeting! 🎉",
-    // ... add more
-],
-```
-
----
-
-## 📄 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
----
-
-<div align="center">
-
-**Made by [Kubendra](https://github.com/Kubendra2004)**
-
-⭐ Star this repo if you found it helpful!
-
-</div>
+- GitHub Pages cannot run a Python backend server.
+- This approach works because Python runs in the browser (PyScript/Pyodide).
+- On GitHub Pages, files are public static assets. If you publish `.env`, your SheetDB URL is public.
