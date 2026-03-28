@@ -62,7 +62,9 @@ Frontend local mode reads/writes Excel through a local Python API server (`local
 - `get total <name>`
 - `show all students`
 - `set mode local`
+- `set mode local-storage`
 - `set mode sheetdb`
+- `set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID`
 - `current mode`
 
 Update behavior:

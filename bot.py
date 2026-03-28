@@ -21,7 +21,9 @@ HELP_TEXT = (
     "- show all students\n\n"
     "Mode Control (Frontend)\n"
     "- set mode local\n"
+    "- set mode local-storage\n"
     "- set mode sheetdb\n"
+    "- set sheetdb api <url>\n"
     "- reload env\n"
     "- current mode\n\n"
     "Chat\n"
@@ -102,7 +104,7 @@ class RuntimeConfig:
     @staticmethod
     def _normalize_mode(value: str) -> str:
         mode = value.strip().lower()
-        return mode if mode in {"sheetdb", "local"} else "sheetdb"
+        return mode if mode in {"sheetdb", "local", "local-storage"} else "sheetdb"
 
     async def load_browser_env(self):
         self.mode_notice = ""
@@ -631,6 +633,151 @@ class BrowserLocalStoreAPI:
         return await cls._fetch_json(f"/students/total?name={quote(name)}")
 
 
+class BrowserMemoryStoreAPI:
+    STORAGE_KEY = "studentbot-local-students-v1"
+
+    @staticmethod
+    def _format_name(name: str) -> str:
+        return " ".join(part.capitalize() for part in name.strip().split())
+
+    @classmethod
+    def _read_all_sync(cls) -> list[dict]:
+        from js import JSON, localStorage  # type: ignore
+
+        raw = localStorage.getItem(cls.STORAGE_KEY)
+        if not raw:
+            return []
+        try:
+            parsed = JSON.parse(raw)
+            return json.loads(JSON.stringify(parsed))
+        except Exception:
+            return []
+
+    @classmethod
+    def _write_all_sync(cls, rows: list[dict]):
+        from js import JSON, localStorage  # type: ignore
+
+        localStorage.setItem(cls.STORAGE_KEY, JSON.stringify(rows))
+
+    @classmethod
+    def _compute_total_percentage(cls, row: dict):
+        m = int(row.get("Math", 0) or 0)
+        s = int(row.get("Science", 0) or 0)
+        e = int(row.get("English", 0) or 0)
+        p = int(row.get("Programming", 0) or 0)
+        total = m + s + e + p
+        row["Total"] = total
+        row["Percentage"] = round((total / 400) * 100, 2)
+
+    @classmethod
+    async def get_all_students(cls):
+        return cls._read_all_sync()
+
+    @classmethod
+    async def get_student_by_name(cls, name: str):
+        target = name.strip().lower()
+        if not target:
+            return None
+        rows = cls._read_all_sync()
+        contains = [r for r in rows if target in str(r.get("Name", "")).strip().lower()]
+        if contains:
+            return contains[0]
+        for row in rows:
+            if str(row.get("Name", "")).strip().lower() == target:
+                return row
+        return None
+
+    @classmethod
+    async def get_student_by_name_exact(cls, name: str):
+        target = name.strip().lower()
+        if not target:
+            return None
+        for row in cls._read_all_sync():
+            if str(row.get("Name", "")).strip().lower() == target:
+                return row
+        return None
+
+    @classmethod
+    async def suggest_student_names(cls, typed_name: str, limit: int = 5) -> list[str]:
+        names = [
+            str(r.get("Name", "")).strip()
+            for r in cls._read_all_sync()
+            if r.get("Name")
+        ]
+        if not names:
+            return []
+
+        typed = typed_name.strip().lower()
+        contains_matches = [n for n in names if typed and typed in n.lower()]
+        if len(contains_matches) >= limit:
+            return contains_matches[:limit]
+
+        fuzzy_matches = difflib.get_close_matches(typed_name.strip(), names, n=limit, cutoff=0.45)
+        merged: list[str] = []
+        for candidate in contains_matches + fuzzy_matches:
+            if candidate not in merged:
+                merged.append(candidate)
+        return merged[:limit]
+
+    @classmethod
+    async def add_student(cls, student: dict):
+        rows = cls._read_all_sync()
+        record = {
+            "Name": cls._format_name(student["Name"]),
+            "Department": str(student.get("Department", "")).strip().capitalize(),
+            "Year": str(student.get("Year", "")).strip(),
+            "Section": str(student.get("Section", "")).strip().upper(),
+            "Math": int(student.get("Math", 0) or 0),
+            "Science": int(student.get("Science", 0) or 0),
+            "English": int(student.get("English", 0) or 0),
+            "Programming": int(student.get("Programming", 0) or 0),
+            "Info": str(student.get("Info", "")).strip(),
+            "Total": 0,
+            "Percentage": 0,
+        }
+        cls._compute_total_percentage(record)
+        rows.append(record)
+        cls._write_all_sync(rows)
+        return record
+
+    @classmethod
+    async def update_student(cls, name: str, update_data: dict):
+        rows = cls._read_all_sync()
+        target = name.strip().lower()
+        for idx, row in enumerate(rows):
+            if str(row.get("Name", "")).strip().lower() == target:
+                merged = {**row, **update_data}
+                merged["Name"] = cls._format_name(str(merged.get("Name", "")).strip())
+                merged["Department"] = str(merged.get("Department", "")).strip().capitalize()
+                merged["Year"] = str(merged.get("Year", "")).strip()
+                merged["Section"] = str(merged.get("Section", "")).strip().upper()
+                merged["Math"] = int(merged.get("Math", 0) or 0)
+                merged["Science"] = int(merged.get("Science", 0) or 0)
+                merged["English"] = int(merged.get("English", 0) or 0)
+                merged["Programming"] = int(merged.get("Programming", 0) or 0)
+                merged["Info"] = str(merged.get("Info", "")).strip()
+                cls._compute_total_percentage(merged)
+                rows[idx] = merged
+                cls._write_all_sync(rows)
+                return merged
+        raise RuntimeError(f"Student '{name}' not found")
+
+    @classmethod
+    async def get_student_total(cls, name: str):
+        student = await cls.get_student_by_name(name)
+        if not student:
+            return None
+        return {
+            "name": student.get("Name", name),
+            "total": student.get("Total", 0),
+            "percentage": student.get("Percentage", 0),
+            "math": student.get("Math", 0),
+            "science": student.get("Science", 0),
+            "english": student.get("English", 0),
+            "programming": student.get("Programming", 0),
+        }
+
+
 class BrowserChatApp:
     def __init__(self):
         from pyscript import document  # type: ignore
@@ -657,7 +804,12 @@ class BrowserChatApp:
         self._bind_api_for_mode()
 
     def _bind_api_for_mode(self):
-        self.api = StudentSheetAPI if RUNTIME_CONFIG.using_sheetdb() else BrowserLocalStoreAPI
+        if RUNTIME_CONFIG.data_mode == "sheetdb":
+            self.api = StudentSheetAPI
+        elif RUNTIME_CONFIG.data_mode == "local-storage":
+            self.api = BrowserMemoryStoreAPI
+        else:
+            self.api = BrowserLocalStoreAPI
 
     def _set_frontend_mode_sync(self, mode: str, announce: bool = True, persist: bool = True) -> bool:
         target = RuntimeConfig._normalize_mode(mode)
@@ -674,7 +826,8 @@ class BrowserChatApp:
             if announce:
                 self.add_message(
                     "bot",
-                    "Cannot switch to sheetdb mode because SHEETDB_API_URL is missing or invalid in .env.",
+                    "Cannot switch to sheetdb mode because SHEETDB_API_URL is missing or invalid in .env. "
+                    "Type: set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID or use set mode local-storage",
                 )
             return False
 
@@ -705,6 +858,10 @@ class BrowserChatApp:
     def _load_saved_frontend_mode(self):
         try:
             from js import localStorage  # type: ignore
+
+            saved_api = localStorage.getItem("studentbot-sheetdb-api")
+            if saved_api and _is_valid_sheetdb_url(str(saved_api)):
+                RUNTIME_CONFIG.sheetdb_api_url = str(saved_api).strip()
 
             saved_mode = localStorage.getItem("studentbot-data-mode")
             if saved_mode:
@@ -880,6 +1037,24 @@ class BrowserChatApp:
 
         if lower in {"current mode", "show mode", "mode"}:
             self.add_message("bot", f"Active mode: {RUNTIME_CONFIG.data_mode}")
+            return
+
+        if lower.startswith("set sheetdb api"):
+            candidate = text[len("set sheetdb api") :].strip()
+            if not _is_valid_sheetdb_url(candidate):
+                self.add_message(
+                    "bot",
+                    "Invalid SheetDB URL. Expected format: https://sheetdb.io/api/v1/YOUR_API_ID",
+                )
+                return
+            RUNTIME_CONFIG.sheetdb_api_url = candidate
+            try:
+                from js import localStorage  # type: ignore
+
+                localStorage.setItem("studentbot-sheetdb-api", candidate)
+            except Exception:
+                pass
+            await self._set_frontend_mode("sheetdb")
             return
 
         if lower in {"reload env", "refresh env"}:
@@ -1191,7 +1366,7 @@ def _run_cli_chatbot():
     backend_kind = RUNTIME_CONFIG.data_mode
     backend = None
 
-    if backend_kind == "local":
+    if backend_kind in {"local", "local-storage"}:
         backend = LocalExcelAPI(RUNTIME_CONFIG.local_excel_path)
     else:
         if not RUNTIME_CONFIG.sheetdb_api_url:
@@ -1377,7 +1552,8 @@ def _start_browser_app() -> bool:
             if not RUNTIME_CONFIG.configured():
                 app.add_message(
                     "bot",
-                    "Configuration is missing. Set DATA_MODE and related keys in .env.",
+                    "Configuration is missing. On GitHub Pages, type: "
+                    "set sheetdb api https://sheetdb.io/api/v1/YOUR_API_ID",
                 )
 
         asyncio.create_task(_bootstrap())
