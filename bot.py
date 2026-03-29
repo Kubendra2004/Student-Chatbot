@@ -696,7 +696,17 @@ class BrowserMemoryStoreAPI:
             return []
         try:
             parsed = JSON.parse(raw)
-            return json.loads(JSON.stringify(parsed))
+            data = json.loads(JSON.stringify(parsed))
+            # Backward compatibility: older builds may have stored an object
+            # like {"data": [...]} instead of a plain list.
+            if isinstance(data, list):
+                return [row for row in data if isinstance(row, dict)]
+            if isinstance(data, dict):
+                if isinstance(data.get("data"), list):
+                    return [row for row in data.get("data", []) if isinstance(row, dict)]
+                if isinstance(data.get("students"), list):
+                    return [row for row in data.get("students", []) if isinstance(row, dict)]
+            return []
         except Exception:
             return []
 
