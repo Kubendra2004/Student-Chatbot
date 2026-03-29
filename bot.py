@@ -30,6 +30,9 @@ HELP_TEXT = (
     "- set sheetdb api <api_id_or_url>\n"
     "- reload env\n"
     "- current mode\n\n"
+    "Local Storage Tools\n"
+    "- local storage status\n"
+    "- clear local storage\n\n"
     "Chat\n"
     "- hi / hello / hey\n"
     "- tell me a fact\n"
@@ -131,7 +134,7 @@ class RuntimeConfig:
     mode_notice: str = ""
 
     def configured(self) -> bool:
-        return self.data_mode == "local" or bool(self.sheetdb_api_url)
+        return self.data_mode in {"local", "local-storage"} or bool(self.sheetdb_api_url)
 
     def using_sheetdb(self) -> bool:
         return self.data_mode == "sheetdb"
@@ -181,11 +184,26 @@ class RuntimeConfig:
         requested_mode = self.data_mode
         if not self.browser_is_localhost:
             if requested_mode == "local":
+                if _is_valid_sheetdb_url(self.sheetdb_api_url):
+                    self.data_mode = "sheetdb"
+                    self.mode_notice = (
+                        "Local mode is only available on localhost. "
+                        "Switched to sheetdb mode for hosted frontend."
+                    )
+                else:
+                    self.data_mode = "local-storage"
+                    self.mode_notice = (
+                        "Local mode is only available on localhost and SheetDB is not configured. "
+                        "Switched to local-storage mode."
+                    )
+            elif requested_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
+                self.data_mode = "local-storage"
                 self.mode_notice = (
-                    "Local mode is only available on localhost. "
-                    "Switched to sheetdb mode for hosted frontend."
+                    "SHEETDB_API_URL is missing/invalid in hosted mode. "
+                    "Switched to local-storage mode."
                 )
-            self.data_mode = "sheetdb"
+            else:
+                self.data_mode = requested_mode
         elif self.data_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
             self.data_mode = "local"
             self.mode_notice = (
@@ -806,6 +824,19 @@ class BrowserMemoryStoreAPI:
             "programming": student.get("Programming", 0),
         }
 
+    @classmethod
+    async def get_storage_stats(cls):
+        rows = cls._read_all_sync()
+        return {
+            "count": len(rows),
+            "names": [str(r.get("Name", "")).strip() for r in rows if r.get("Name")],
+        }
+
+    @classmethod
+    async def clear_storage(cls):
+        cls._write_all_sync([])
+        return {"cleared": True}
+
 
 class BrowserChatApp:
     def __init__(self):
@@ -872,7 +903,13 @@ class BrowserChatApp:
                 pass
 
         if announce:
-            self.add_message("bot", f"Switched mode to {target}.")
+            if target == "local-storage":
+                self.add_message(
+                    "bot",
+                    "Switched mode to local-storage. Data is saved in this browser only.",
+                )
+            else:
+                self.add_message("bot", f"Switched mode to {target}.")
         return True
 
     async def _set_frontend_mode(self, mode: str, announce: bool = True, persist: bool = True) -> bool:
@@ -897,6 +934,15 @@ class BrowserChatApp:
             saved_mode = localStorage.getItem("studentbot-data-mode")
             if saved_mode:
                 self._set_frontend_mode_sync(str(saved_mode), announce=False, persist=False)
+
+            # In hosted mode with no saved preference, prefer local-storage over broken sheetdb.
+            if (
+                not saved_mode
+                and not RUNTIME_CONFIG.browser_is_localhost
+                and RUNTIME_CONFIG.data_mode == "sheetdb"
+                and not _is_valid_sheetdb_url(RUNTIME_CONFIG.sheetdb_api_url)
+            ):
+                self._set_frontend_mode_sync("local-storage", announce=False, persist=True)
         except Exception:
             pass
 
@@ -1068,6 +1114,20 @@ class BrowserChatApp:
 
         if lower in {"current mode", "show mode", "mode"}:
             self.add_message("bot", f"Active mode: {RUNTIME_CONFIG.data_mode}")
+            return
+
+        if lower in {"local storage status", "local-storage status", "storage status"}:
+            stats = await BrowserMemoryStoreAPI.get_storage_stats()
+            self.add_message(
+                "bot",
+                f"Local-storage records: {stats['count']}. "
+                "This data stays in your current browser.",
+            )
+            return
+
+        if lower in {"clear local storage", "clear local-storage", "clear storage"}:
+            await BrowserMemoryStoreAPI.clear_storage()
+            self.add_message("bot", "Local-storage data cleared successfully.")
             return
 
         if lower.startswith("set sheetdb api"):
