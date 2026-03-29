@@ -1,0 +1,54 @@
+[
+  {
+    "Name": "John H.",
+    "Department": "Computer Science",
+    "Year": "2",
+    "Section": "A",
+    "Math": 84,
+    "Science": 79,
+    "English": 88,
+    "Programming": 91,
+    "Info": "Interested in backend development",
+    "Total": 342,
+    "Percentage": 85.5
+  },
+  {
+    "Name": "Maya R.",
+    "Department": "Electronics",
+    "Year": "3",
+    "Section": "B",
+    "Math": 76,
+    "Science": 90,
+    "English": 81,
+    "Programming": 74,
+    "Info": "Robotics club member",
+    "Total": 321,
+    "Percentage": 80.25
+  },
+  {
+    "Name": "Arun K.",
+    "Department": "Information Technology",
+    "Year": "1",
+    "Section": "C",
+    "Math": 92,
+    "Science": 87,
+    "English": 78,
+    "Programming": 89,
+    "Info": "Hackathon participant",
+    "Total": 346,
+    "Percentage": 86.5
+  },
+  {
+    "Name": "Nila S.",
+    "Department": "Mechanical",
+    "Year": "4",
+    "Section": "A",
+    "Math": 68,
+    "Science": 72,
+    "English": 85,
+    "Programming": 77,
+    "Info": "Project lead for final year design",
+    "Total": 302,
+    "Percentage": 75.5
+  }
+]

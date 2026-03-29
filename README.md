@@ -45,9 +45,9 @@ You can switch mode with `DATA_MODE`:
 
 Hosted frontend behavior:
 
-- On GitHub-hosted frontend, app forces `sheetdb` mode automatically.
-- `local` mode is allowed only on `localhost`.
-- If someone tries `set mode local` on GitHub Pages, a clear message is shown.
+- On GitHub-hosted frontend, if `sheetdb` is not configured, app falls back to `local` mode.
+- Hosted `local` mode loads starter records from `seed_students.json` and supports in-session add/update/get/show operations.
+- Hosted `local` changes are session-only (not persisted after refresh).
 
 CLI local mode reads and updates the Excel file at `LOCAL_EXCEL_PATH` (default: `chat.xlsx`).
 Frontend local mode reads/writes Excel through a local Python API server (`local_excel_api_server.py`).
@@ -63,11 +63,11 @@ Frontend local mode reads/writes Excel through a local Python API server (`local
 - `get total <name>`
 - `show all students`
 - `set mode local`
-- `set mode local-storage`
 - `set mode sheetdb`
 - `set sheetdb api YOUR_API_ID` (or full SheetDB URL)
 - `reload env`
 - `current mode`
+- `local status`
 
 Update behavior:
 
@@ -129,3 +129,4 @@ Your bot will run fully client-side with Python through PyScript.
 - First load can take longer than a normal JS page because PyScript downloads Python runtime files.
 - The app now shows UI immediately and loads configuration in the background to reduce page-freeze issues.
 - In hosted mode, the SheetDB API key is saved in browser local storage and reused on next load.
+- `seed_students.json` provides random starter data for hosted local mode.

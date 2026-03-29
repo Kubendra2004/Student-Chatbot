@@ -26,21 +26,19 @@ HELP_TEXT = (
     "- show all students\n\n"
     "Mode Control (Frontend)\n"
     "- set mode local\n"
-    "- set mode local-storage\n"
     "- set mode sheetdb\n"
     "- set sheetdb api <api_id_or_url>\n"
     "- reload env\n"
     "- current mode\n\n"
-    "Local Storage Tools\n"
-    "- local storage status\n"
-    "- clear local storage\n\n"
+    "Local Mode Tools\n"
+    "- local status\n\n"
     "Chat\n"
     "- hi / hello / hey\n"
     "- tell me a fact\n"
     "- help\n\n"
     "Notes\n"
     "- First load can take longer because Python runs in the browser.\n"
-    "- On hosted pages, local mode is disabled; use sheetdb mode."
+    "- On hosted pages, local mode uses bundled seed data (session-only changes)."
 )
 
 
@@ -135,7 +133,7 @@ class RuntimeConfig:
     mode_notice: str = ""
 
     def configured(self) -> bool:
-        return self.data_mode in {"local", "local-storage"} or bool(self.sheetdb_api_url)
+        return self.data_mode == "local" or bool(self.sheetdb_api_url)
 
     def using_sheetdb(self) -> bool:
         return self.data_mode == "sheetdb"
@@ -146,7 +144,7 @@ class RuntimeConfig:
     @staticmethod
     def _normalize_mode(value: str) -> str:
         mode = value.strip().lower()
-        return mode if mode in {"sheetdb", "local", "local-storage"} else "sheetdb"
+        return mode if mode in {"sheetdb", "local"} else "sheetdb"
 
     async def load_browser_env(self):
         self.mode_notice = ""
@@ -185,23 +183,16 @@ class RuntimeConfig:
         requested_mode = self.data_mode
         if not self.browser_is_localhost:
             if requested_mode == "local":
-                if _is_valid_sheetdb_url(self.sheetdb_api_url):
-                    self.data_mode = "sheetdb"
-                    self.mode_notice = (
-                        "Local mode is only available on localhost. "
-                        "Switched to sheetdb mode for hosted frontend."
-                    )
-                else:
-                    self.data_mode = "local-storage"
-                    self.mode_notice = (
-                        "Local mode is only available on localhost and SheetDB is not configured. "
-                        "Switched to local-storage mode."
-                    )
+                self.data_mode = "local"
+                self.mode_notice = (
+                    "Hosted local mode uses bundled seed data with in-session updates. "
+                    "Changes are not permanent after refresh."
+                )
             elif requested_mode == "sheetdb" and not _is_valid_sheetdb_url(self.sheetdb_api_url):
-                self.data_mode = "local-storage"
+                self.data_mode = "local"
                 self.mode_notice = (
                     "SHEETDB_API_URL is missing/invalid in hosted mode. "
-                    "Switched to local-storage mode."
+                    "Switched to local mode with bundled seed data."
                 )
             else:
                 self.data_mode = requested_mode
@@ -681,6 +672,161 @@ class BrowserLocalStoreAPI:
         return await cls._fetch_json(f"/students/total?name={quote(name)}")
 
 
+class BrowserSeedAPI:
+    _rows_cache: list[dict] = []
+    _loaded = False
+
+    @staticmethod
+    def _format_name(name: str) -> str:
+        return " ".join(part.capitalize() for part in name.strip().split())
+
+    @classmethod
+    async def _ensure_loaded(cls):
+        if cls._loaded:
+            return
+        cls._loaded = True
+        try:
+            from js import fetch  # type: ignore
+
+            response = await _fetch_with_timeout(
+                fetch("seed_students.json"),
+                5.0,
+                "Timed out while loading seed data.",
+            )
+            if response.ok:
+                text = await _fetch_with_timeout(
+                    response.text(),
+                    5.0,
+                    "Timed out while reading seed data.",
+                )
+                data = json.loads(text) if text else []
+                if isinstance(data, list):
+                    cls._rows_cache = [row for row in data if isinstance(row, dict)]
+        except Exception:
+            cls._rows_cache = []
+
+    @classmethod
+    def _compute_total_percentage(cls, row: dict):
+        m = int(row.get("Math", 0) or 0)
+        s = int(row.get("Science", 0) or 0)
+        e = int(row.get("English", 0) or 0)
+        p = int(row.get("Programming", 0) or 0)
+        total = m + s + e + p
+        row["Total"] = total
+        row["Percentage"] = round((total / 400) * 100, 2)
+
+    @classmethod
+    async def get_all_students(cls):
+        await cls._ensure_loaded()
+        return list(cls._rows_cache)
+
+    @classmethod
+    async def get_student_by_name(cls, name: str):
+        await cls._ensure_loaded()
+        target = name.strip().lower()
+        if not target:
+            return None
+        contains = [r for r in cls._rows_cache if target in str(r.get("Name", "")).strip().lower()]
+        if contains:
+            return contains[0]
+        for row in cls._rows_cache:
+            if str(row.get("Name", "")).strip().lower() == target:
+                return row
+        return None
+
+    @classmethod
+    async def get_student_by_name_exact(cls, name: str):
+        await cls._ensure_loaded()
+        target = name.strip().lower()
+        if not target:
+            return None
+        for row in cls._rows_cache:
+            if str(row.get("Name", "")).strip().lower() == target:
+                return row
+        return None
+
+    @classmethod
+    async def suggest_student_names(cls, typed_name: str, limit: int = 5) -> list[str]:
+        await cls._ensure_loaded()
+        names = [str(r.get("Name", "")).strip() for r in cls._rows_cache if r.get("Name")]
+        if not names:
+            return []
+        typed = typed_name.strip().lower()
+        contains_matches = [n for n in names if typed and typed in n.lower()]
+        if len(contains_matches) >= limit:
+            return contains_matches[:limit]
+        fuzzy_matches = difflib.get_close_matches(typed_name.strip(), names, n=limit, cutoff=0.45)
+        merged: list[str] = []
+        for candidate in contains_matches + fuzzy_matches:
+            if candidate not in merged:
+                merged.append(candidate)
+        return merged[:limit]
+
+    @classmethod
+    async def add_student(cls, student: dict):
+        await cls._ensure_loaded()
+        record = {
+            "Name": cls._format_name(student["Name"]),
+            "Department": str(student.get("Department", "")).strip().capitalize(),
+            "Year": str(student.get("Year", "")).strip(),
+            "Section": str(student.get("Section", "")).strip().upper(),
+            "Math": int(student.get("Math", 0) or 0),
+            "Science": int(student.get("Science", 0) or 0),
+            "English": int(student.get("English", 0) or 0),
+            "Programming": int(student.get("Programming", 0) or 0),
+            "Info": str(student.get("Info", "")).strip(),
+            "Total": 0,
+            "Percentage": 0,
+        }
+        cls._compute_total_percentage(record)
+        cls._rows_cache.append(record)
+        return record
+
+    @classmethod
+    async def update_student(cls, name: str, update_data: dict):
+        await cls._ensure_loaded()
+        target = name.strip().lower()
+        for idx, row in enumerate(cls._rows_cache):
+            if str(row.get("Name", "")).strip().lower() == target:
+                merged = {**row, **update_data}
+                merged["Name"] = cls._format_name(str(merged.get("Name", "")).strip())
+                merged["Department"] = str(merged.get("Department", "")).strip().capitalize()
+                merged["Year"] = str(merged.get("Year", "")).strip()
+                merged["Section"] = str(merged.get("Section", "")).strip().upper()
+                merged["Math"] = int(merged.get("Math", 0) or 0)
+                merged["Science"] = int(merged.get("Science", 0) or 0)
+                merged["English"] = int(merged.get("English", 0) or 0)
+                merged["Programming"] = int(merged.get("Programming", 0) or 0)
+                merged["Info"] = str(merged.get("Info", "")).strip()
+                cls._compute_total_percentage(merged)
+                cls._rows_cache[idx] = merged
+                return merged
+        raise RuntimeError(f"Student '{name}' not found")
+
+    @classmethod
+    async def get_student_total(cls, name: str):
+        student = await cls.get_student_by_name(name)
+        if not student:
+            return None
+        return {
+            "name": student.get("Name", name),
+            "total": student.get("Total", 0),
+            "percentage": student.get("Percentage", 0),
+            "math": student.get("Math", 0),
+            "science": student.get("Science", 0),
+            "english": student.get("English", 0),
+            "programming": student.get("Programming", 0),
+        }
+
+    @classmethod
+    async def get_storage_stats(cls):
+        await cls._ensure_loaded()
+        return {
+            "count": len(cls._rows_cache),
+            "names": [str(r.get("Name", "")).strip() for r in cls._rows_cache if r.get("Name")],
+        }
+
+
 class BrowserMemoryStoreAPI:
     STORAGE_KEY = "studentbot-local-students-v1"
 
@@ -883,28 +1029,21 @@ class BrowserChatApp:
     def _bind_api_for_mode(self):
         if RUNTIME_CONFIG.data_mode == "sheetdb":
             self.api = StudentSheetAPI
-        elif RUNTIME_CONFIG.data_mode == "local-storage":
-            self.api = BrowserMemoryStoreAPI
         else:
-            self.api = BrowserLocalStoreAPI
+            if RUNTIME_CONFIG.browser_is_localhost:
+                self.api = BrowserLocalStoreAPI
+            else:
+                self.api = BrowserSeedAPI
 
     def _set_frontend_mode_sync(self, mode: str, announce: bool = True, persist: bool = True) -> bool:
         target = RuntimeConfig._normalize_mode(mode)
-
-        if target == "local" and not RUNTIME_CONFIG.browser_is_localhost:
-            if announce:
-                self.add_message(
-                    "bot",
-                    "Local mode is only available on localhost. On GitHub Pages, use sheetdb mode.",
-                )
-            return False
 
         if target == "sheetdb" and not _is_valid_sheetdb_url(RUNTIME_CONFIG.sheetdb_api_url):
             if announce:
                 self.add_message(
                     "bot",
                     "Cannot switch to sheetdb mode because SHEETDB_API_URL is missing or invalid in .env. "
-                    "Type: set sheetdb api YOUR_API_ID (or full URL) or use set mode local-storage",
+                    "Type: set sheetdb api YOUR_API_ID (or full URL) or use set mode local",
                 )
             return False
 
@@ -920,10 +1059,10 @@ class BrowserChatApp:
                 pass
 
         if announce:
-            if target == "local-storage":
+            if target == "local" and not RUNTIME_CONFIG.browser_is_localhost:
                 self.add_message(
                     "bot",
-                    "Switched mode to local-storage. Data is saved in this browser only.",
+                    "Switched mode to local. Hosted local mode uses bundled seed data (session-only changes).",
                 )
             else:
                 self.add_message("bot", f"Switched mode to {target}.")
@@ -951,15 +1090,6 @@ class BrowserChatApp:
             saved_mode = localStorage.getItem("studentbot-data-mode")
             if saved_mode:
                 self._set_frontend_mode_sync(str(saved_mode), announce=False, persist=False)
-
-            # In hosted mode with no saved preference, prefer local-storage over broken sheetdb.
-            if (
-                not saved_mode
-                and not RUNTIME_CONFIG.browser_is_localhost
-                and RUNTIME_CONFIG.data_mode == "sheetdb"
-                and not _is_valid_sheetdb_url(RUNTIME_CONFIG.sheetdb_api_url)
-            ):
-                self._set_frontend_mode_sync("local-storage", announce=False, persist=True)
         except Exception:
             pass
 
@@ -1133,20 +1263,34 @@ class BrowserChatApp:
             self.add_message("bot", f"Active mode: {RUNTIME_CONFIG.data_mode}")
             return
 
-        if lower in {"local storage status", "local-storage status", "storage status"}:
-            stats = await BrowserMemoryStoreAPI.get_storage_stats()
-            names_preview = ", ".join(stats["names"][:5]) if stats.get("names") else "none"
-            self.add_message(
-                "bot",
-                f"Local-storage records: {stats['count']}. "
-                f"This data stays in your current browser. Active mode: {RUNTIME_CONFIG.data_mode}. "
-                f"Names: {names_preview}.",
-            )
-            return
+        if lower in {"local status", "storage status"}:
+            try:
+                if RUNTIME_CONFIG.data_mode != "local":
+                    self.add_message("bot", "Local status is available only in local mode.")
+                    return
 
-        if lower in {"clear local storage", "clear local-storage", "clear storage"}:
-            await BrowserMemoryStoreAPI.clear_storage()
-            self.add_message("bot", "Local-storage data cleared successfully.")
+                if RUNTIME_CONFIG.browser_is_localhost:
+                    local_rows = await BrowserLocalStoreAPI.get_all_students()
+                    count = len(local_rows or [])
+                    names = [
+                        str(r.get("Name", "")).strip()
+                        for r in (local_rows or [])
+                        if isinstance(r, dict) and r.get("Name")
+                    ]
+                else:
+                    stats = await BrowserSeedAPI.get_storage_stats()
+                    count = int(stats.get("count", 0))
+                    names = [str(n).strip() for n in stats.get("names", []) if str(n).strip()]
+
+                names_preview = ", ".join(names[:5]) if names else "none"
+                self.add_message(
+                    "bot",
+                    f"Local records: {count}. "
+                    f"Active mode: {RUNTIME_CONFIG.data_mode}. "
+                    f"Names: {names_preview}.",
+                )
+            except Exception as exc:
+                self.add_message("bot", f"Could not load local status. Error: {exc}")
             return
 
         if lower.startswith("set sheetdb api"):
@@ -1318,7 +1462,7 @@ class BrowserChatApp:
                     self.add_message(
                         "bot",
                         f"No student found with name: {name}. "
-                        "Tip: check current mode or run 'local storage status'.",
+                        "Tip: check current mode or run 'local status'.",
                     )
                 return
 
@@ -1496,7 +1640,7 @@ def _run_cli_chatbot():
     backend_kind = RUNTIME_CONFIG.data_mode
     backend = None
 
-    if backend_kind in {"local", "local-storage"}:
+    if backend_kind == "local":
         backend = LocalExcelAPI(RUNTIME_CONFIG.local_excel_path)
     else:
         if not RUNTIME_CONFIG.sheetdb_api_url:
