@@ -180,6 +180,7 @@
 
     <script>
         (() => {
+            const BOT_ASSET_VERSION = '20260329-3';
             let runtimeRequested = false;
             let runtimeReady = false;
 
@@ -216,7 +217,7 @@
                 runtimeScript.addEventListener('load', () => {
                     showRuntimeStatus('Loading chatbot...');
                     const pyScriptEl = document.createElement('py-script');
-                    pyScriptEl.setAttribute('src', 'bot.py');
+                    pyScriptEl.setAttribute('src', `bot.py?v=${BOT_ASSET_VERSION}`);
                     pyScriptEl.addEventListener('py:ready', () => {
                         runtimeReady = true;
                         showRuntimeStatus('Student Bot ready');

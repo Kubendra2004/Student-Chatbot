@@ -688,6 +688,21 @@ class BrowserMemoryStoreAPI:
         return " ".join(part.capitalize() for part in name.strip().split())
 
     @classmethod
+    def _coerce_rows(cls, data) -> list[dict]:
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        if isinstance(data, dict):
+            if isinstance(data.get("data"), list):
+                return [row for row in data.get("data", []) if isinstance(row, dict)]
+            if isinstance(data.get("students"), list):
+                return [row for row in data.get("students", []) if isinstance(row, dict)]
+            # Extra fallback: map-like structures {"0": {...}, "1": {...}}
+            dict_values = [v for v in data.values() if isinstance(v, dict)]
+            if dict_values:
+                return dict_values
+        return []
+
+    @classmethod
     def _read_all_sync(cls) -> list[dict]:
         from js import JSON, localStorage  # type: ignore
 
@@ -697,16 +712,7 @@ class BrowserMemoryStoreAPI:
         try:
             parsed = JSON.parse(raw)
             data = json.loads(JSON.stringify(parsed))
-            # Backward compatibility: older builds may have stored an object
-            # like {"data": [...]} instead of a plain list.
-            if isinstance(data, list):
-                return [row for row in data if isinstance(row, dict)]
-            if isinstance(data, dict):
-                if isinstance(data.get("data"), list):
-                    return [row for row in data.get("data", []) if isinstance(row, dict)]
-                if isinstance(data.get("students"), list):
-                    return [row for row in data.get("students", []) if isinstance(row, dict)]
-            return []
+            return cls._coerce_rows(data)
         except Exception:
             return []
 
@@ -778,7 +784,7 @@ class BrowserMemoryStoreAPI:
 
     @classmethod
     async def add_student(cls, student: dict):
-        rows = cls._read_all_sync()
+        rows = cls._coerce_rows(cls._read_all_sync())
         record = {
             "Name": cls._format_name(student["Name"]),
             "Department": str(student.get("Department", "")).strip().capitalize(),
@@ -799,7 +805,7 @@ class BrowserMemoryStoreAPI:
 
     @classmethod
     async def update_student(cls, name: str, update_data: dict):
-        rows = cls._read_all_sync()
+        rows = cls._coerce_rows(cls._read_all_sync())
         target = name.strip().lower()
         for idx, row in enumerate(rows):
             if str(row.get("Name", "")).strip().lower() == target:
