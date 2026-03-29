@@ -20,6 +20,7 @@ HELP_TEXT = (
     "- update student\n"
     "- update student <name>\n"
     "- get student <name>\n"
+    "- retrieve student <name>\n"
     "- get total <name>\n\n"
     "View Data\n"
     "- show all students\n\n"
@@ -1134,10 +1135,12 @@ class BrowserChatApp:
 
         if lower in {"local storage status", "local-storage status", "storage status"}:
             stats = await BrowserMemoryStoreAPI.get_storage_stats()
+            names_preview = ", ".join(stats["names"][:5]) if stats.get("names") else "none"
             self.add_message(
                 "bot",
                 f"Local-storage records: {stats['count']}. "
-                "This data stays in your current browser.",
+                f"This data stays in your current browser. Active mode: {RUNTIME_CONFIG.data_mode}. "
+                f"Names: {names_preview}.",
             )
             return
 
@@ -1204,8 +1207,11 @@ class BrowserChatApp:
             self.add_message("bot", "Enter the exact student's name to update:")
             return
 
-        if lower.startswith("get student"):
-            name = text[len("get student") :].strip()
+        if lower.startswith("get student") or lower.startswith("retrieve student"):
+            if lower.startswith("get student"):
+                name = text[len("get student") :].strip()
+            else:
+                name = text[len("retrieve student") :].strip()
             if not name:
                 self.conversation_state = "awaiting_search_name"
                 self.add_message("bot", "What's the student's name you're looking for?")
@@ -1213,8 +1219,11 @@ class BrowserChatApp:
             await self._get_student(name)
             return
 
-        if lower.startswith("get total"):
-            name = text[len("get total") :].strip()
+        if lower.startswith("get total") or lower.startswith("retrieve total"):
+            if lower.startswith("get total"):
+                name = text[len("get total") :].strip()
+            else:
+                name = text[len("retrieve total") :].strip()
             if not name:
                 self.conversation_state = "awaiting_total_name"
                 self.add_message("bot", "Whose total marks would you like to see?")
@@ -1296,7 +1305,21 @@ class BrowserChatApp:
         try:
             student = await self.api.get_student_by_name(name)
             if not student:
-                self.add_message("bot", f"No student found with name: {name}")
+                suggestions = await self.api.suggest_student_names(name)
+                if suggestions:
+                    suggested_text = "\n".join(f"- {item}" for item in suggestions)
+                    self.add_message(
+                        "bot",
+                        f"No student found with name: {name}.\n"
+                        "Try one of these:\n"
+                        f"{suggested_text}",
+                    )
+                else:
+                    self.add_message(
+                        "bot",
+                        f"No student found with name: {name}. "
+                        "Tip: check current mode or run 'local storage status'.",
+                    )
                 return
 
             rows = "".join(
